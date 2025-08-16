@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 from pathlib import Path
+import tempfile
 
 from .exporter import export_highlights
-from .detect import find_kobo_sqlite_paths, choose_best_kobo_sqlite
+from .md_exporter import export_markdown_from_csv
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -22,8 +24,19 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--out",
         dest="out_csv",
-        default="highlights_enriched.csv",
-        help="Output CSV file (default: %(default)s)",
+        default=None,
+        help=(
+            "Output CSV file. If omitted, a temporary CSV is used and deleted automatically."
+        ),
+    )
+    p.add_argument(
+        "--md-dir",
+        dest="md_dir",
+        default="notes",
+        help=(
+            "Directory to write Markdown notes grouped by book (default: %(default)s). "
+            "Output structure: <md_dir>/<Author>/<Title>.md"
+        ),
     )
     p.add_argument(
         "--keep-filename-chapter",
@@ -32,22 +45,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Keep chapter titles that look like filenames (default is to suppress)",
     )
     p.add_argument(
-        "--detect-db",
-        dest="detect_db",
-        action="store_true",
-        help=(
-            "Scan common mount points (USB) to locate .kobo/KoboReader.sqlite. "
-            "Also used automatically if --db path is not found."
-        ),
-    )
-    p.add_argument(
-        "-i",
-        "--interactive",
-        dest="interactive",
-        action="store_true",
-        help=(
-            "Interactive mode: choose among detected databases or enter a path manually"
-        ),
+        "--log-level",
+        dest="log_level",
+        default="INFO",
+        choices=["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"],
+        help="Logging level (default: %(default)s)",
     )
     return p
 
@@ -55,93 +57,52 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     args = build_parser().parse_args(argv)
-    # Resolve DB path: use provided path if it exists; otherwise (or if --detect-db),
-    # attempt to find the database under common USB mount points.
-    selected_db = Path(args.db_path)
-    need_detect = args.detect_db or not selected_db.is_file()
-    if need_detect:
-        candidates = find_kobo_sqlite_paths()
-        if args.interactive:
-            # Interactive selection or manual entry
-            while True:
-                if not candidates:
-                    print(
-                        "No Kobo databases detected on mounted drives.",
-                        file=sys.stderr,
-                    )
-                    manual = input(
-                        "Enter path to KoboReader.sqlite (or 'q' to quit): "
-                    ).strip()
-                    if manual.lower() in {"q", "quit", "exit"}:
-                        return 2
-                    mp = Path(manual).expanduser()
-                    if mp.is_file():
-                        selected_db = mp
-                        break
-                    print(
-                        "Path not found or not a file. Please try again.",
-                        file=sys.stderr,
-                    )
-                    continue
-                # Show detected candidates
-                print("Detected Kobo databases:")
-                for i, pth in enumerate(candidates, 1):
-                    print(f"  {i}) {pth}")
-                choice = input(
-                    "Select [1-{}], 'm' to enter path manually, or 'q' to quit: ".format(
-                        len(candidates)
-                    )
-                ).strip()
-                if choice.lower() in {"q", "quit", "exit"}:
-                    return 2
-                if choice.lower() in {"m", "manual"}:
-                    manual = input("Enter path to KoboReader.sqlite: ").strip()
-                    mp = Path(manual).expanduser()
-                    if mp.is_file():
-                        selected_db = mp
-                        break
-                    print(
-                        "Path not found or not a file. Please try again.",
-                        file=sys.stderr,
-                    )
-                    continue
-                try:
-                    idx = int(choice)
-                except ValueError:
-                    print("Invalid selection.", file=sys.stderr)
-                    continue
-                if not (1 <= idx <= len(candidates)):
-                    print("Selection out of range.", file=sys.stderr)
-                    continue
-                selected_db = candidates[idx - 1]
-                break
-        else:
-            if not candidates:
-                print(
-                    "Could not locate .kobo/KoboReader.sqlite on mounted drives. "
-                    "Specify --db PATH explicitly.",
-                    file=sys.stderr,
-                )
-                return 2
-            if len(candidates) == 1:
-                selected_db = candidates[0]
-            else:
-                best = choose_best_kobo_sqlite(candidates)
-                selected_db = best or candidates[0]
-                # Inform about multiple matches
-                print("Found multiple Kobo databases:", file=sys.stderr)
-                for p in candidates:
-                    print(f"  - {p}", file=sys.stderr)
-                print(f"Choosing: {selected_db}", file=sys.stderr)
-
-    print(f"Using DB: {selected_db}")
-    count = export_highlights(
-        db_path=str(selected_db),
-        out_csv=args.out_csv,
-        suppress_filename_chapter_titles=args.suppress_filename,
+    # Configure logging
+    logging.basicConfig(
+        level=getattr(logging, args.log_level.upper(), logging.INFO),
+        format="%(levelname)s: %(message)s",
     )
-    out_path = Path(args.out_csv).resolve()
-    print(f"Wrote {count} rows to {out_path}")
+    log = logging.getLogger(__name__)
+    # Require an explicit, existing database path
+    selected_db = Path(args.db_path).expanduser()
+    if not selected_db.is_file():
+        log.error(
+            "Database file not found: %s. Specify a valid path with --db.", selected_db
+        )
+        return 2
+
+    log.info("Using DB: %s", selected_db)
+    provided_csv = args.out_csv is not None and str(args.out_csv).strip() != ""
+    if provided_csv:
+        out_path = Path(args.out_csv).resolve()
+        count = export_highlights(
+            db_path=str(selected_db),
+            out_csv=str(out_path),
+            suppress_filename_chapter_titles=args.suppress_filename,
+        )
+        log.info("Wrote %d rows to %s", count, out_path)
+        md_base = Path(args.md_dir).expanduser() if args.md_dir else None
+        if md_base:
+            files = export_markdown_from_csv(str(out_path), str(md_base))
+            log.info("Rendered %d Markdown files under %s", files, md_base.resolve())
+    else:
+        # Use a temporary CSV that will be removed automatically
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_csv = Path(tmpdir) / "highlights_enriched.csv"
+            count = export_highlights(
+                db_path=str(selected_db),
+                out_csv=str(tmp_csv),
+                suppress_filename_chapter_titles=args.suppress_filename,
+            )
+            # Default to Markdown output directory
+            md_base = Path(args.md_dir).expanduser() if args.md_dir else None
+            if md_base:
+                files = export_markdown_from_csv(str(tmp_csv), str(md_base))
+                log.info(
+                    "Rendered %d Markdown files under %s", files, md_base.resolve()
+                )
+            else:
+                log.info("Wrote %d rows (temporary CSV used)", count)
     return 0
 
 

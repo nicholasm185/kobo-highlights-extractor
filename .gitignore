@@ -8,3 +8,6 @@
 __pycache__
 .venv
 .ruff_cache
+
+# Extractor Default Output
+notes

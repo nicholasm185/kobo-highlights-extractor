@@ -10,10 +10,10 @@ Public API:
 from __future__ import annotations
 
 import csv
+import logging
 import os
 import re
 import sqlite3
-import sys
 from typing import Any, Dict, Tuple, Optional, TypedDict, Final, List
 from urllib.parse import urlparse, unquote
 
@@ -24,6 +24,25 @@ from .chapter_title import (
     _clean_title,
     _p_anchor,
     _tail_after_bang_bang_no_fragment,
+)
+
+log = logging.getLogger(__name__)
+
+
+# Module-level constants
+COLOR_MAP: Final[dict[int, str]] = {0: "yellow", 1: "pink", 2: "blue", 3: "green"}
+
+OUT_FIELDS: Final[tuple[str, ...]] = (
+    "BookmarkID",
+    "BookTitle",
+    "Author",
+    "ChapterTitle",
+    "DateCreated",
+    "DateModified",
+    "Color",
+    "Text",
+    "Annotation",
+    "Type",
 )
 
 
@@ -55,7 +74,6 @@ class CsvRow(TypedDict, total=False):
     DateCreated: Optional[str]
     DateModified: Optional[str]
     ChapterProgress: Optional[float]
-    Color: Optional[str]
     Hidden: Optional[int]
     Text: Optional[str]
     Annotation: Optional[str]
@@ -64,6 +82,8 @@ class CsvRow(TypedDict, total=False):
     SyncTime: Optional[str]
     ContextString: Optional[str]
     Type: Optional[int]
+    HtmlOpen: Optional[str]
+    HtmlClose: Optional[str]
 
 
 def _strip_after_bang_bang(content_id: Optional[str]) -> Optional[str]:
@@ -236,8 +256,8 @@ def export_highlights(
             bid = d.get("BookID")
             if isinstance(bid, str):
                 content_by_book.setdefault(bid, []).append(d)
-    except sqlite3.DatabaseError as e:
-        print(f"Error reading content table: {e}", file=sys.stderr)
+    except sqlite3.DatabaseError:
+        log.exception("Error reading content table")
 
     # Fetch highlights/notes
     rows_db = cur.execute(
@@ -289,19 +309,7 @@ def export_highlights(
             )
         )
 
-    # Trimmed output fields per user preferences
-    OUT_FIELDS: Final[tuple[str, ...]] = (
-        "BookmarkID",
-        "BookTitle",
-        "Author",
-        "ChapterTitle",
-        "DateCreated",
-        "DateModified",
-        "Color",  # mapped: 0-3 -> yellow/pink/blue/green
-        "Text",
-        "Annotation",
-        "Type",
-    )
+    # Using module-level OUT_FIELDS
 
     written = 0
     with open(out_csv, "w", newline="", encoding="utf-8") as f:
@@ -397,12 +405,7 @@ def export_highlights(
             else:
                 idx = None
             if idx is not None:
-                COLOR_MAP = {0: "yellow", 1: "pink", 2: "blue", 3: "green"}
                 color_name = COLOR_MAP.get(idx)
-            # If we couldn't map, keep original value as string (or empty)
-            if color_name is None:
-                color_name = str(color_val) if color_val is not None else ""
-
             w.writerow(
                 {
                     "BookmarkID": r.get("BookmarkID"),
@@ -411,7 +414,7 @@ def export_highlights(
                     "ChapterTitle": ch_title or "",
                     "DateCreated": r.get("DateCreated"),
                     "DateModified": r.get("DateModified"),
-                    "Color": color_name,
+                    "Color": color_name or "",
                     "Text": r.get("Text"),
                     "Annotation": r.get("Annotation"),
                     "Type": r.get("Type"),
