@@ -4,3 +4,7 @@
 *.sqlite-shm
 
 *.csv
+
+__pycache__
+.venv
+.ruff_cache

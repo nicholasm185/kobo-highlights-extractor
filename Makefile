@@ -2,7 +2,7 @@ SHELL := bash
 .DEFAULT_GOAL := help
 
 RUFF := uvx -q ruff
-BASEDPYRIGHT := uvx -q basedpyright
+PYREFLY := uvx -q pyrefly
 
 # Directories/files to check
 PY_DIRS := src
@@ -15,7 +15,7 @@ help:
 	@echo "  lint       Lint with Ruff (no changes)"
 	@echo "  lint-fix   Lint and auto-fix issues"
 	@echo "  check      Run formatter in check mode and linter"
-	@echo "  typecheck  Run basedpyright type checker"
+	@echo "  typecheck  Run Pyrefly type checker"
 
 fmt:
 	$(RUFF) format $(PY_DIRS)
@@ -34,4 +34,4 @@ check:
 	$(RUFF) check $(PY_DIRS)
 
 typecheck:
-	$(BASEDPYRIGHT) .
+	$(PYREFLY) check $(PY_DIRS)

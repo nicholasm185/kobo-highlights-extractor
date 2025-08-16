@@ -410,6 +410,34 @@ def determine_chapter_title(
             if best_pa[2]:
                 ch_title = best_pa[2]
 
+    # If still missing, try sibling tails with '-N' suffix (common ToC mapping to chapter entry)
+    if not ch_title:
+        tail = _tail_after_bang_bang_no_fragment(cont_id)
+        if tail:
+            for n in (1, 2, 3, 4, 5):
+                alt_tail = f"{tail}-{n}"
+                cand_rows = content_by_tail.get(alt_tail) or []
+                best_title = None
+                best_key = (-1, -1, "")  # (depth, length, title)
+                for cr in cand_rows:
+                    t = _clean_title(
+                        cr.get("Title"), suppress_filename_like=suppress_filename_like
+                    )
+                    if not t or t.lower() == "table of contents":
+                        continue
+                    depth_raw = cr.get("Depth")
+                    try:
+                        depth = int(depth_raw) if depth_raw is not None else 0
+                    except Exception:
+                        depth = 0
+                    tup = (depth, len(t), t)
+                    if tup > best_key:
+                        best_key = tup
+                        best_title = t
+                if best_title:
+                    ch_title = best_title
+                    break
+
     # If still missing, try rows with same pre-bang (same book file), prefer non-generic
     if (not ch_title) and pre_bang:
         cand_rows = content_by_pre_bang.get(pre_bang) or []

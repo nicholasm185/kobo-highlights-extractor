@@ -3,8 +3,8 @@ Core export logic for Kobo highlights.
 
 Public API:
 - export_highlights(db_path: str = "KoboReader.sqlite", out_csv: str = "highlights_enriched.csv",
-                    suppress_filename_chapter_titles: bool = True) -> int
-  Returns number of rows written (including header? we'll return data rows).
+                   suppress_filename_chapter_titles: bool = True) -> int
+  Returns number of data rows written (excludes header).
 """
 
 from __future__ import annotations
@@ -120,6 +120,50 @@ def _strip_fragment(content_id: Optional[str]) -> Optional[str]:
     return content_id[:idx] if idx != -1 else content_id
 
 
+def _as_opt_float(v: Any) -> Optional[float]:
+    """Best-effort convert a value into Optional[float].
+
+    Accepts int/float directly, parses str (empty -> None), otherwise None.
+    """
+    if v is None:
+        return None
+    if isinstance(v, (int, float)):
+        return float(v)
+    if isinstance(v, str):
+        s = v.strip()
+        if not s:
+            return None
+        try:
+            return float(s)
+        except Exception:
+            return None
+    return None
+
+
+def _as_opt_int(v: Any) -> Optional[int]:
+    """Best-effort convert a value into Optional[int].
+
+    Accepts int directly, truncates float, parses str digits, else None.
+    """
+    if v is None:
+        return None
+    if isinstance(v, int):
+        return v
+    if isinstance(v, float):
+        try:
+            return int(v)
+        except Exception:
+            return None
+    if isinstance(v, str):
+        s = v.strip()
+        if s.isdigit() or (s.startswith("-") and s[1:].isdigit()):
+            try:
+                return int(s)
+            except Exception:
+                return None
+    return None
+
+
 def _parse_from_volume_id(vol_id: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
     """Best-effort parse of title and author from the VolumeID file path."""
     if not vol_id:
@@ -202,8 +246,21 @@ def export_highlights(
                ChapterProgress, Color, Hidden, Text, Annotation, UUID, UserID,
                SyncTime, ContextString, Type
         FROM Bookmark
-        WHERE (Text IS NOT NULL AND TRIM(Text)!='')
-           OR (Annotation IS NOT NULL AND TRIM(Annotation)!='')
+        WHERE ((Text IS NOT NULL AND TRIM(Text)!='')
+           OR (Annotation IS NOT NULL AND TRIM(Annotation)!=''))
+          AND (
+            CASE
+              WHEN Hidden IS NULL THEN 1
+              WHEN typeof(Hidden)='integer' THEN CASE WHEN Hidden=0 THEN 1 ELSE 0 END
+              WHEN typeof(Hidden)='real' THEN CASE WHEN Hidden=0.0 THEN 1 ELSE 0 END
+              WHEN typeof(Hidden)='text' THEN CASE
+                   WHEN lower(Hidden) IN ('false','0','no','n') THEN 1
+                   WHEN trim(Hidden)='' THEN 1
+                   ELSE 0
+                 END
+              ELSE 1
+            END
+          )=1
         ORDER BY DateCreated
         """
     ).fetchall()
@@ -219,37 +276,30 @@ def export_highlights(
                 ContentID=drr.get("ContentID"),
                 DateCreated=drr.get("DateCreated"),
                 DateModified=drr.get("DateModified"),
-                ChapterProgress=drr.get("ChapterProgress"),
+                ChapterProgress=_as_opt_float(drr.get("ChapterProgress")),
                 Color=drr.get("Color"),
-                Hidden=drr.get("Hidden"),
+                Hidden=_as_opt_int(drr.get("Hidden")),
                 Text=drr.get("Text"),
                 Annotation=drr.get("Annotation"),
                 UUID=drr.get("UUID"),
                 UserID=drr.get("UserID"),
                 SyncTime=drr.get("SyncTime"),
                 ContextString=drr.get("ContextString"),
-                Type=drr.get("Type"),
+                Type=_as_opt_int(drr.get("Type")),
             )
         )
 
+    # Trimmed output fields per user preferences
     OUT_FIELDS: Final[tuple[str, ...]] = (
         "BookmarkID",
         "BookTitle",
         "Author",
         "ChapterTitle",
-        "VolumeID",
-        "ContentID",
         "DateCreated",
         "DateModified",
-        "ChapterProgress",
-        "Color",
-        "Hidden",
+        "Color",  # mapped: 0-3 -> yellow/pink/blue/green
         "Text",
         "Annotation",
-        "UUID",
-        "UserID",
-        "SyncTime",
-        "ContextString",
         "Type",
     )
 
@@ -334,25 +384,36 @@ def export_highlights(
                 if not author:
                     author = a_guess
 
+            # Map color codes 0-3 to names
+            color_val = r.get("Color")
+            color_name = None
+            if isinstance(color_val, (int, float)):
+                try:
+                    idx = int(color_val)
+                except Exception:
+                    idx = None
+            elif isinstance(color_val, str) and color_val.strip().isdigit():
+                idx = int(color_val.strip())
+            else:
+                idx = None
+            if idx is not None:
+                COLOR_MAP = {0: "yellow", 1: "pink", 2: "blue", 3: "green"}
+                color_name = COLOR_MAP.get(idx)
+            # If we couldn't map, keep original value as string (or empty)
+            if color_name is None:
+                color_name = str(color_val) if color_val is not None else ""
+
             w.writerow(
                 {
                     "BookmarkID": r.get("BookmarkID"),
                     "BookTitle": book_title or "",
                     "Author": author or "",
                     "ChapterTitle": ch_title or "",
-                    "VolumeID": vol_id,
-                    "ContentID": cont_id,
                     "DateCreated": r.get("DateCreated"),
                     "DateModified": r.get("DateModified"),
-                    "ChapterProgress": r.get("ChapterProgress"),
-                    "Color": r.get("Color"),
-                    "Hidden": r.get("Hidden"),
+                    "Color": color_name,
                     "Text": r.get("Text"),
                     "Annotation": r.get("Annotation"),
-                    "UUID": r.get("UUID"),
-                    "UserID": r.get("UserID"),
-                    "SyncTime": r.get("SyncTime"),
-                    "ContextString": r.get("ContextString"),
                     "Type": r.get("Type"),
                 }
             )
