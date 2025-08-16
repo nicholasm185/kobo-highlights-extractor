@@ -11,3 +11,9 @@ __pycache__
 
 # Extractor Default Output
 notes
+
+# PyInstaller artifacts
+dist/
+build/
+*.spec
+!main.spec

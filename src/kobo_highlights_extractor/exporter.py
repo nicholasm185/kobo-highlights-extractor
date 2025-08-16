@@ -210,8 +210,12 @@ def export_highlights(
     out_csv: str = "highlights_enriched.csv",
     suppress_filename_chapter_titles: bool = True,
 ) -> int:
-    # Open DB read-only
-    con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    # Open DB in immutable read-only mode to avoid creating sidecar WAL/SHM files.
+    # Fall back to plain read-only if the runtime SQLite lacks immutable support.
+    try:
+        con = sqlite3.connect(f"file:{db_path}?mode=ro&immutable=1", uri=True)
+    except sqlite3.OperationalError:
+        con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     con.row_factory = sqlite3.Row
     cur = con.cursor()
 

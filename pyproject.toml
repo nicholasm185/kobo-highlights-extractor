@@ -4,7 +4,9 @@ version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+  "typer>=0.12,<1",
+]
 
 [project.scripts]
 kobo-highlights-extractor = "kobo_highlights_extractor.cli:main"

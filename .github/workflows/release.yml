@@ -1,0 +1,107 @@
+name: Release executables
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            archive: tar.gz
+            ext: ""
+          - os: macos-13   # Intel
+            archive: tar.gz
+            ext: ""
+          - os: macos-latest  # Apple Silicon
+            archive: tar.gz
+            ext: ""
+          - os: windows-latest
+            archive: zip
+            ext: .exe
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Build executable with PyInstaller
+        run: |
+          uv run --with pyinstaller pyinstaller main.spec
+
+      - name: Determine artifact name
+        id: name
+        shell: bash
+        run: |
+          APP_NAME="kobo-highlights-extractor"
+          VERSION="${GITHUB_REF_NAME}"
+          # Normalize OS/arch
+          OS="${RUNNER_OS}"
+          ARCH="${RUNNER_ARCH}"
+          # Binary path
+          BIN="dist/${APP_NAME}${{ matrix.ext }}"
+          echo "bin=${BIN}" >> "$GITHUB_OUTPUT"
+          ASSET_BASENAME="${APP_NAME}-${VERSION}-${OS}-${ARCH}"
+          echo "asset_base=${ASSET_BASENAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Package artifact (tar.gz)
+        if: matrix.archive == 'tar.gz'
+        shell: bash
+        run: |
+          ASSET="${{ steps.name.outputs.asset_base }}.tar.gz"
+          tar -C dist -czf "$ASSET" "kobo-highlights-extractor"
+          echo "asset=$ASSET" >> "$GITHUB_OUTPUT"
+
+      - name: Package artifact (zip)
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: |
+          $asset = "${{ steps.name.outputs.asset_base }}.zip"
+          Compress-Archive -Path "${{ steps.name.outputs.bin }}" -DestinationPath $asset
+          echo "asset=$asset" >> $env:GITHUB_OUTPUT
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.name.outputs.asset_base }}
+          path: |
+            *.zip
+            *.tar.gz
+
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: downloads
+          merge-multiple: true
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            downloads/*.zip
+            downloads/*.tar.gz
+          generate_release_notes: true
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
