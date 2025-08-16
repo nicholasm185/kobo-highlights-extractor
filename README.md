@@ -14,7 +14,7 @@ Kobo Highlights Extractor
  - A local copy of your Kobo `KoboReader.sqlite` database
  
  # Installation
- Run directly from the repo (no install):
+Run directly from the repo (no install):
  
  ```bash
  uv run -m kobo_highlights_extractor --db /path/to/KoboReader.sqlite
@@ -27,8 +27,39 @@ Kobo Highlights Extractor
  kobo-highlights-extractor --db /path/to/KoboReader.sqlite
  ```
  
- # Usage
- Default (Markdown to `notes/`, temporary CSV auto-deleted):
+## Install from Releases (prebuilt executables)
+Download an executable from GitHub Releases for your OS/arch.
+
+- Linux/macOS (tar.gz):
+  ```bash
+  # Example: kobo-highlights-extractor-v1.0.0-Linux-X64.tar.gz
+  tar -xzf kobo-highlights-extractor-<version>-<OS>-<ARCH>.tar.gz
+  chmod +x kobo-highlights-extractor  # may not be necessary
+  ./kobo-highlights-extractor --help
+  ```
+  - macOS Gatekeeper may block unsigned binaries. You can allow it via:
+    ```bash
+    xattr -dr com.apple.quarantine kobo-highlights-extractor
+    ```
+
+- Windows (zip):
+  1. Unzip the archive
+  2. Run `kobo-highlights-extractor.exe`
+
+Notes:
+- Linux binaries are built on Ubuntu 20.04 to maximize glibc compatibility.
+- Each artifact contains a single binary; place it on your PATH if you like (e.g., `/usr/local/bin`).
+
+## Build locally
+Requires `uv` (or a Python 3.12 environment) and PyInstaller will be added transiently.
+
+```bash
+make build-exe
+./dist/kobo-highlights-extractor --help
+```
+
+# Usage
+Default (Markdown to `notes/`, temporary CSV auto-deleted):
  
  ```bash
  uv run -m kobo_highlights_extractor --db /path/to/KoboReader.sqlite
@@ -43,7 +74,8 @@ Kobo Highlights Extractor
    Directory for Markdown output. Default: `notes`. Structure: `notes/<Author>/<Title>.md`.
  
  - `--out PATH`
-   CSV output path. If omitted, a temporary CSV is used and deleted automatically after Markdown generation.
+  CSV output path. Default is `-`, which uses a temporary CSV that is deleted automatically after Markdown generation.
+  When running interactively, pressing Enter will keep the default `-`.
  
  - `--keep-filename-chapter`
    Keep chapter titles that look like filenames (suppressed by default).
@@ -54,6 +86,9 @@ Kobo Highlights Extractor
  Examples:
  
  ```bash
+ # Run interactively
+ uv run -m kobo_highlights_extractor
+
  # Default: Markdown to notes/, temp CSV
  uv run -m kobo_highlights_extractor --db ~/KoboReader.sqlite
  
